@@ -1,22 +1,22 @@
 import argparse
+import csv
 import json
 import os
-from collections import OrderedDict
 import torch
-import csv
+import torch.optim as optim
 import util
+
+from collections import OrderedDict
 from transformers import DistilBertTokenizerFast
 from transformers import DistilBertForQuestionAnswering
 from transformers import AdamW
 from tensorboardX import SummaryWriter
-
-import torch.optim as optim
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import RandomSampler, SequentialSampler
-from args import get_train_test_args
-
 from tqdm import tqdm
+
+from args import get_train_test_args
 
 def prepare_eval_data(dataset_dict, tokenizer):
     tokenized_examples = tokenizer(dataset_dict['question'],
@@ -46,10 +46,7 @@ def prepare_eval_data(dataset_dict, tokenizer):
             (o if sequence_ids[k] == 1 else None)
             for k, o in enumerate(tokenized_examples["offset_mapping"][i])
         ]
-
     return tokenized_examples
-
-
 
 def prepare_train_data(dataset_dict, tokenizer):
     tokenized_examples = tokenizer(dataset_dict['question'],
@@ -118,8 +115,6 @@ def prepare_train_data(dataset_dict, tokenizer):
     print(f"Preprocessing not completely accurate for {inaccurate}/{total} instances")
     return tokenized_examples
 
-
-
 def read_and_process(args, tokenizer, dataset_dict, dir_name, dataset_name, split):
     #TODO: cache this if possible
     cache_path = f'{dir_name}/{dataset_name}_encodings.pt'
@@ -134,10 +129,8 @@ def read_and_process(args, tokenizer, dataset_dict, dir_name, dataset_name, spli
     return tokenized_examples
 
 class TrainerConfig:
-    # optimization parameters
+    # optimization parameters config
     # max_epochs = 10
-    # batch_size = 64
-    # learning_rate = 3e-4
     betas = (0.9, 0.95)
     grad_norm_clip = 1.0
     weight_decay = 0.1 # only applied on matmul weights
@@ -145,9 +138,6 @@ class TrainerConfig:
     lr_decay = False
     warmup_tokens = 375e6 # these two numbers come from the GPT-3 paper, but may not be good defaults elsewhere
     final_tokens = 260e9 # (at what point we reach 10% of original LR)
-    # checkpoint settings
-    ckpt_path = None
-    # num_workers = 0 # for DataLoader
 
     def __init__(self, **kwargs):
         for k,v in kwargs.items():
@@ -171,13 +161,11 @@ class Trainer:
         if not os.path.exists(self.path):
             os.makedirs(self.path)
     
-
     def save(self, model):
         model.save_pretrained(self.path)
         
     def evaluate(self, model, data_loader, data_dict, return_preds=False, split='validation'):
         device = self.device
-
         model.eval()
         pred_dict = {}
         all_start_logits = []
@@ -218,7 +206,6 @@ class Trainer:
 
     def train(self, model, train_dataloader, eval_dataloader, val_dict):
         # create the optimizer
-
         if self.vanilla_finetune:
 
             no_decay = ['bias', 'gamma', 'beta']
@@ -232,20 +219,15 @@ class Trainer:
             optim_groups = [{"params": [p for n, p in model.named_parameters()]}]
         
         optimizer = optim.AdamW(optim_groups, lr=self.lr, betas=self.config.betas)
-
         device = self.device
         model.to(device)
-        
         global_idx = 0
         best_scores = {'F1': -1.0, 'EM': -1.0}
         tbx = SummaryWriter(self.save_dir)
-
-
         for epoch_num in range(self.num_epochs):
             self.log.info(f'Epoch: {epoch_num}')
             with torch.enable_grad(), tqdm(total=len(train_dataloader.dataset)) as progress_bar:
                 for batch in train_dataloader:
-
                     optimizer.zero_grad()
                     model.train()
                     input_ids = batch['input_ids'].to(device)
@@ -255,7 +237,6 @@ class Trainer:
                     outputs = model(input_ids, attention_mask=attention_mask,
                                     start_positions=start_positions,
                                     end_positions=end_positions)
-
                     loss = outputs[0]
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), self.config.grad_norm_clip)
@@ -284,7 +265,6 @@ class Trainer:
                         if curr_score['F1'] >= best_scores['F1']:
                             best_scores = curr_score
                             self.save(model)
-
                     global_idx += 1
         print("For the purpose of model selection, Best Scores of the Validation is: ",format(best_scores))
         return best_scores
@@ -296,16 +276,13 @@ def get_dataset(args, datasets, data_dir, tokenizer, split_name):
     for dataset in datasets:
         dataset_name += f'_{dataset}'
         dataset_dict_curr = util.read_squad(f'{data_dir}/{dataset}')
-        dataset_dict = util.merge(dataset_dict, dataset_dict_curr)
-        
+        dataset_dict = util.merge(dataset_dict, dataset_dict_curr)    
     data_encodings = read_and_process(args, tokenizer, dataset_dict, data_dir, dataset_name, split_name)
-
     return util.QADataset(data_encodings, train=(split_name=='train')), dataset_dict
 
 def main():
     # define parser and arguments
     args = get_train_test_args()
-
     util.set_seed(args.seed)
     model = DistilBertForQuestionAnswering.from_pretrained("distilbert-base-uncased")
     tokenizer = DistilBertTokenizerFast.from_pretrained('distilbert-base-uncased')    
@@ -318,20 +295,17 @@ def main():
         log.info(f'Args: {json.dumps(vars(args), indent=4, sort_keys=True)}')
         log.info("Preparing Training Data...")
         args.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
         tconf = TrainerConfig()
         trainer = Trainer(args, log, tconf)
 
         if args.do_vanilla_finetune:
             # Use pretraining baseline model param as initalization and continue fine-tuning
             model = DistilBertForQuestionAnswering.from_pretrained(args.baseline_model_dir)
-
             train_dataset, _ = get_dataset(args, args.eval_datasets, args.vanilla_finetune_train_dir, tokenizer, 'train')
             log.info("Preparing Validation Data...")
             val_dataset, val_dict = get_dataset(args, args.eval_datasets, args.vanilla_finetune_val_dir, tokenizer, 'val')
 
         else: 
-
             train_dataset, _ = get_dataset(args, args.train_datasets, args.train_dir, tokenizer, 'train')
             log.info("Preparing Validation Data...")
             val_dataset, val_dict = get_dataset(args, args.train_datasets, args.val_dir, tokenizer, 'val')
@@ -347,17 +321,11 @@ def main():
     if args.do_eval:
         args.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         split_name = 'test' if 'test' in args.eval_dir else 'validation'
-
-
         log = util.get_logger(args.save_dir, f'log_{split_name}')
         tconf = TrainerConfig()
         trainer = Trainer(args, log, tconf)
-
-
         checkpoint_path = os.path.join(args.save_dir, 'checkpoint')
-
         model = DistilBertForQuestionAnswering.from_pretrained(checkpoint_path)
-
         model.to(args.device)
         eval_dataset, eval_dict = get_dataset(args, args.eval_datasets, args.eval_dir, tokenizer, split_name)
         eval_loader = DataLoader(eval_dataset,
@@ -377,7 +345,6 @@ def main():
             csv_writer.writerow(['Id', 'Predicted'])
             for uuid in sorted(eval_preds):
                 csv_writer.writerow([uuid, eval_preds[uuid]])
-
 
 if __name__ == '__main__':
     main()
