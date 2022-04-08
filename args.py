@@ -29,20 +29,3 @@ def get_train_test_args():
 
     args = parser.parse_args()
     return args
-
-# Train a baseline system with python:
-# python train.py --do-train --eval-every 2000 --run-name baseline
-# 
-# Evaluate the system on test set with python:
-# python train.py --do-eval --sub-file mtl_submission.csv --save-dir save/baseline-01 
-# 
-# Train a fine-tune model based on baseline system:
-# python train.py --do-train --do-vanilla-finetune --eval-every 1000  --run-name vanilla-finetune --baseline-model-dir save/baseline-01/checkpoint
-#
-# Evaluate the fine-tune system on test set with python:
-# python train.py --do-eval --sub-file mtl_submission.csv --save-dir save/vanilla-finetune-01
-
-
-
-
-
